@@ -1,0 +1,64 @@
+---
+apiVersion: appmesh.k8s.aws/v1beta2
+kind: VirtualGateway
+metadata:
+  name: ingress-gw-new
+  namespace: snens
+spec:
+  namespaceSelector:
+    matchLabels:
+      gateway: ingress-gw-new
+  podSelector:
+    matchLabels:
+      app: ingress-gw-new
+  listeners:
+    - portMapping:
+        port: 8088
+        protocol: http
+  logging:
+    accessLog:
+      file:
+        path: /dev/stdout
+---
+apiVersion: appmesh.k8s.aws/v1beta2
+kind: GatewayRoute
+metadata:
+  name: gateway-route-sne-app-svc-new
+  namespace: snens
+spec:
+  httpRoute:
+    match:
+      prefix: "/"
+    action:
+      rewrite:
+        hostname:
+          defaultTargetHostname: DISABLED
+      target:
+        virtualService:
+          virtualServiceRef:
+            name: sne-app-svc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingress-gw-new
+  namespace: snens
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ingress-gw-new
+  template:
+    metadata:
+      labels:
+        app: ingress-gw-new
+    spec:
+      containers:
+        - name: envoy
+          image: 840364872350.dkr.ecr.us-west-2.amazonaws.com/aws-appmesh-envoy:v1.17.2.0
+          ports:
+            - containerPort: 8088
+            
+            
+            
+            

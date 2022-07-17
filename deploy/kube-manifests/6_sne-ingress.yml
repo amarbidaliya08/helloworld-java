@@ -1,0 +1,41 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: 
+  annotations: 
+    alb.ingress.kubernetes.io/scheme: internal
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP 
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-west-2:864968415604:certificate/f30138c3-ef5a-4be2-aae8-6e86c120c44c
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS":443}]'
+    #alb.ingress.kubernetes.io/ssl-redirect: '443'
+    alb.ingress.kubernetes.io/success-codes: 200,302,301
+    alb.ingress.kubernetes.io/healthcheck-path: /entitlementsearch/sample
+
+  name: sne-ingress-gateway
+  namespace: snens
+spec:
+  rules:
+  - host: snegateway.arch.junipercloud.net
+    http:
+      paths:
+      - pathType: Prefix
+        path: "/"
+        backend:
+          service:
+            name: ingress-gw-new
+            port:
+              number: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingress-gw-new
+  namespace: snens
+spec:
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 8088
+      name: http
+  selector:
+    app: ingress-gw-new
