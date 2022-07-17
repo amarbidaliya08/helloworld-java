@@ -1,0 +1,91 @@
+### gitlab-ci.yml reference: https://docs.gitlab.com/ce/ci/yaml/README.html
+
+### Stages control the flow of CI Jobs
+### All jobs within the Build stage will be run, then all jobs in the deploy job will be run.
+stages:
+  - build
+  - package
+  - deploy
+  
+variables:
+  ARTIFACT_NAME: "javatest"
+  IMAGE_NAME: javatest
+  MAVEN_REPO: "$CI_PROJECT_DIR/.m2"
+  REPOSITORY_URI: "246818788759.dkr.ecr.us-west-2.amazonaws.com/k8infra"
+
+.sw_verification_and_setup: &exec_sw_verification_and_setup_definition |
+  apt update -y
+  apt install amazon-ecr-credential-helper -y
+
+build:
+  stage: build
+  image: maven:latest
+  before_script:
+    - echo $CI_PROJECT_DIR
+    - echo "after maven"
+    - mvn clean package -DskipTests=true
+    - echo "after maven"
+  script:
+    - echo "before maven command"
+    - mvn clean package -DskipTests=true
+    - echo "after maven"
+  artifacts:
+    paths:
+      - target/*.jar
+  tags:
+    - jnpr-it-dev
+  only:
+    - main
+package:
+  stage: package
+  image: docker:20-dind
+  services:
+    - name: docker:20-dind
+      alias: docker
+      command: ["--tls=false"]
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_HOST: tcp://docker:2375 
+    DOCKER_TLS_CERTDIR: ""
+    CI_REGISTRY_AWS: "246818788759.dkr.ecr.us-west-2.amazonaws.com"
+    CI_REPO: "246818788759.dkr.ecr.us-west-2.amazonaws.com/k8infra"
+    IMAGE_NAME: javatest
+  before_script:
+    - apk add --no-cache curl jq python3 py3-pip
+    - pip install awscli
+    - echo $CI_REGISTRY_AWS
+    - aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin $CI_REGISTRY_AWS
+    - aws --version
+  script:
+    - echo "{\"credHelpers\":{\"$CI_REGISTRY_AWS\":\"ecr-login\"}}" > $DOCKER_CONFIG/config.json
+    - cat $DOCKER_CONFIG/config.json
+    - echo $CI_COMMIT_REF_SLUG-$CI_PIPELINE_ID
+    - echo $ARTIFACT_NAME-$CI_PIPELINE_ID
+    - docker build --tag $ARTIFACT_NAME-$CI_PIPELINE_ID .
+    - docker tag $ARTIFACT_NAME-$CI_PIPELINE_ID $CI_REPO:$ARTIFACT_NAME-$CI_PIPELINE_ID
+    - docker push $CI_REPO:$ARTIFACT_NAME-$CI_PIPELINE_ID
+  tags:
+    - jnpr-it-dev
+  only:
+    - main
+deploy:
+  stage: deploy
+  image: jshimko/kube-tools-aws:latest
+  variables:
+    CI_REPO: "246818788759.dkr.ecr.us-west-2.amazonaws.com/k8infra"
+  script:
+    - env
+    - aws eks update-kubeconfig --name eks-first-cluster --region us-west-2 --debug
+    #- kubectl cluster-info
+    # Docker Image Tag Source Version
+    #- TAG="$(echo $CI_REGISTRY_AWS/eks-repo:$ARTIFACT_NAME-$CI_PIPELINE_ID)"
+    # Update Image tag in our Kubernetes Deployment Manifest        
+    - echo "Update Image tag in kube-manifest..."
+    - TAG_SED="$(echo $CI_REPO:$ARTIFACT_NAME-$CI_PIPELINE_ID)"
+    - echo $TAG_SED
+    - sed -ri "s|CONTAINER_IMAGE|$TAG_SED|" ./deploy/kube-manifests/4_javatest-app-deployment-all.yml
+    - kubectl apply -k ./deploy/kube-manifests
+  tags:
+    - jnpr-it-dev
+  only:
+    - main
